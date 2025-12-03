@@ -2359,12 +2359,12 @@ function generateSummaryReport(results: TestResult[], randomSampleCount: number)
       }
 
       // Count how many times each aggregator had the best net amount
-      // Use total number of results with net amounts instead of unique route groups
-      const totalNetRoutes = resultsWithNetAmounts.length;
+      // Use total number of unique route groups (samples)
+      const totalNetRoutes = netAmountRouteGroups.size;
       const netAmountStats = aggregators.map((aggregatorName) => {
         const aggregatorNetResults = resultsWithNetAmounts.filter((r) => r.protocol === aggregatorName);
         const bestNetCount = aggregatorNetResults.filter((r) => (r as any).bestNetAmount === true).length;
-        const bestNetPercentage = totalNetRoutes > 0 ? (bestNetCount / totalNetRoutes) * 100 : 0;
+        const bestNetPercentage = totalNetRoutes > 0 ? (bestNetCount / totalNetRoutes) * 100 : 0; // percentage of routes with the best net amount
 
         return {
           aggregatorName,
@@ -2478,8 +2478,8 @@ function generateSummaryReport(results: TestResult[], randomSampleCount: number)
       }
 
       // Count how many times each aggregator had the best simulation output
-      // Use total number of successful simulations instead of unique route groups
-      const totalSimRoutes = resultsWithSimulation.length;
+      // Use total number of unique route groups (samples)
+      const totalSimRoutes = routeGroups.size;
       const simStats = aggregators.map((aggregatorName) => {
         const aggregatorSimResults = resultsWithSimulation.filter((r) => r.protocol === aggregatorName);
         const bestSimCount = aggregatorSimResults.filter((r) => (r as any).simulationOutputResult === "best").length;
