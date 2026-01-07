@@ -5,22 +5,20 @@ import { BaseAggregator, type AggregatorOutput, type FetchOptions } from "./base
 export class OpenOceanAggregator extends BaseAggregator {
   constructor(name: string, baseUrl: string) {
     super(name, baseUrl);
-
-    if (!process.env.DEFAULT_GAS_PRICE) {
-      console.error(`Error: DEFAULT_GAS_PRICE is not set in environment variables.`);
-      console.error(`This gas price is required for the ${name} aggregator.`);
-      console.error(`Please set DEFAULT_GAS_PRICE in your .env file.`);
-      process.exit(1);
-    }
   }
 
   buildQuoteUrl(request: QuoteRequest): string {
+    const gasPrice = process.env.DEFAULT_GAS_PRICE || "1000000000"; // 1 gwei fallback
+    if (!process.env.DEFAULT_GAS_PRICE) {
+      // Don't hard-fail; OpenOcean requires a gasPrice param but it can be a reasonable default.
+      console.warn(`[openocean] DEFAULT_GAS_PRICE not set; using fallback gasPrice=${gasPrice}`);
+    }
     const params = new URLSearchParams({
       quoteType: "swap",
       inTokenAddress: request.tokenIn,
       outTokenAddress: request.tokenOut,
       amount: getAmountInTokenDecimals(request.amountIn, request.tokenInDecimals),
-      gasPrice: process.env.DEFAULT_GAS_PRICE || "1",
+      gasPrice: gasPrice,
       slippage: ((request.slippage || 0.005) * 100).toString(), // Convert to percentage (1 = 1%)
       account: process.env.DEFAULT_SENDER_ACCOUNT || "",
     });

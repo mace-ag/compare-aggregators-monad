@@ -3,9 +3,9 @@
 ## Overview
 
 The DEX Aggregator Comparison Script is a sophisticated benchmarking and analysis tool designed to objectively compare
-the performance of decentralized exchange (DEX) aggregators on Monad (mainnet or testnet). This tool helps identify which
-aggregators provide the best trading outcomes for users by testing real-world trading scenarios across hundreds of token
-pairs and trade sizes.
+the performance of decentralized exchange (DEX) aggregators on Monad (mainnet or testnet). This tool helps identify
+which aggregators provide the best trading outcomes for users by testing real-world trading scenarios across hundreds of
+token pairs and trade sizes.
 
 ### Purpose
 
@@ -127,7 +127,8 @@ sizes that real users actually transact.
 
 ### Mainnet Availability Notes
 
-- **Monorail**: currently not available on mainnet (disabled by default). Enable only if you have a working endpoint by setting `ENABLE_MONORAIL=1` and `AGG_MONORAIL_BASE_URL=...`.
+- **Monorail**: currently not available on mainnet (disabled by default). Enable only if you have a working endpoint by
+  setting `ENABLE_MONORAIL=1` and `AGG_MONORAIL_BASE_URL=...`.
 - **Dirol**: may not be available on mainnet (disabled by default unless `AGG_DIROL_BASE_URL` is set).
 - **0x**: disabled by default unless `ZEROX_API_KEY` is set.
 
@@ -155,7 +156,7 @@ bun install
 3. (Optional) Set up environment variables:
 
 ```bash
-cp .env.example .env
+cp env.example .env
 # Edit .env with your API keys if needed
 ```
 
@@ -635,8 +636,8 @@ KURU_JWT=<kuru_jwt_token>
 
 **Kuru (Flow API JWT):**
 
-Kuru uses the Flow API with Bearer JWT auth. See Kuru docs: `https://docs.kuru.io/api-reference/calculate-best-path-quote`.
-Add the JWT to `.env` as `KURU_JWT=<token>`.
+Kuru uses the Flow API with Bearer JWT auth. See Kuru docs:
+`https://docs.kuru.io/api-reference/calculate-best-path-quote`. Add the JWT to `.env` as `KURU_JWT=<token>`.
 
 **Eisen Finance:**
 

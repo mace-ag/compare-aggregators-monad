@@ -33,7 +33,7 @@ const SIMULATION = args.findIndex((arg) => arg === "--simulation" || arg === "-s
 const NETWORK_CONFIG = getNetworkConfig(args, process.env);
 
 // Parse aggregator selection argument
-// Usage: --aggregators madhouse,opeanocean or -a madhouse,openocean
+// Usage: --aggregators mace,openocean or -a mace,openocean
 const aggregatorArgIndex = args.findIndex((arg) => arg === "--aggregators" || arg === "-a");
 const selectedAggregatorNames =
   aggregatorArgIndex >= 0 && args[aggregatorArgIndex + 1]
@@ -59,7 +59,7 @@ Options:
   --simulation, -s         Enable transaction simulation (requires Anvil fork)
   --network, -n <net>      Select network: mainnet | testnet (default: mainnet)
   --aggregators, -a <list> Comma-separated list of aggregators to test
-                          Example: --aggregators madhouse,openocean
+                          Example: --aggregators mace,openocean
   --random, -r <count>    Test with random sampling of pairs and amounts
                           Example: --random 10 (tests 10 random combinations)
   --help, -h              Show this help message
@@ -69,7 +69,7 @@ Examples:
   bun run compare
 
   # Test specific aggregators
-  bun run compare --aggregators madhouse,openocean
+  bun run compare --aggregators mace,openocean
 
   # Test with 10 random samples
   bun run compare --random 10
@@ -349,7 +349,7 @@ async function fetchTokenDataOnchain(
   }
 }
 
-// Helper function to fetch USDC price for a token using Madhouse API
+// Helper function to fetch USDC price for a token using the baseline aggregator
 async function fetchUSDCPriceForToken(tokenAddress: string): Promise<number | null> {
   if (!USDC_ADDRESS) {
     return null;
@@ -360,8 +360,8 @@ async function fetchUSDCPriceForToken(tokenAddress: string): Promise<number | nu
   }
 
   try {
-    // Create Madhouse aggregator
-    const madhouseAggregator = createAggregator("madhouse", NETWORK_CONFIG.aggregatorBaseUrls.madhouse);
+    // Create baseline aggregator (Mace)
+    const priceAggregator = createAggregator("mace", NETWORK_CONFIG.aggregatorBaseUrls.mace);
 
     // We need to know how much USDC we get for 1 unit of the token
     // So we query USDC -> token with 1 USDC input to get the exchange rate
@@ -379,9 +379,9 @@ async function fetchUSDCPriceForToken(tokenAddress: string): Promise<number | nu
       slippage: SLIPPAGE,
     };
 
-    const url = madhouseAggregator.buildQuoteUrl(request);
+    const url = priceAggregator.buildQuoteUrl(request);
     const fetchOptions: FetchOptions = {};
-    madhouseAggregator.addRequestData(request, fetchOptions);
+    priceAggregator.addRequestData(request, fetchOptions);
 
     const response = await fetch(url, fetchOptions as RequestInit);
     if (!response.ok) {
@@ -389,7 +389,8 @@ async function fetchUSDCPriceForToken(tokenAddress: string): Promise<number | nu
     }
 
     const data: any = await response.json();
-    const amountOut = BigInt(data.amountOut || "0");
+    const { outputAmount } = priceAggregator.getOutput(data);
+    const amountOut = BigInt(outputAmount || "0");
 
     if (amountOut > 0) {
       // Convert amountOut to number with proper decimals
@@ -404,7 +405,7 @@ async function fetchUSDCPriceForToken(tokenAddress: string): Promise<number | nu
   }
 }
 
-// Helper function to fetch MON price for a token using Madhouse API
+// Helper function to fetch MON price for a token using the baseline aggregator
 async function fetchMONPriceForToken(tokenAddress: string): Promise<number | null> {
   // Skip if it's MON itself
   if (tokenAddress.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()) {
@@ -412,8 +413,8 @@ async function fetchMONPriceForToken(tokenAddress: string): Promise<number | nul
   }
 
   try {
-    // Create Madhouse aggregator
-    const madhouseAggregator = createAggregator("madhouse", NETWORK_CONFIG.aggregatorBaseUrls.madhouse);
+    // Create baseline aggregator (Mace)
+    const priceAggregator = createAggregator("mace", NETWORK_CONFIG.aggregatorBaseUrls.mace);
 
     // We need to know how much MON we get for 1 unit of the token
     // So we query MON -> token with 1 MON input to get the exchange rate
@@ -431,9 +432,9 @@ async function fetchMONPriceForToken(tokenAddress: string): Promise<number | nul
       slippage: SLIPPAGE,
     };
 
-    const url = madhouseAggregator.buildQuoteUrl(request);
+    const url = priceAggregator.buildQuoteUrl(request);
     const fetchOptions: FetchOptions = {};
-    madhouseAggregator.addRequestData(request, fetchOptions);
+    priceAggregator.addRequestData(request, fetchOptions);
 
     const response = await fetch(url, fetchOptions as RequestInit);
 
@@ -443,7 +444,7 @@ async function fetchMONPriceForToken(tokenAddress: string): Promise<number | nul
     }
 
     const data = (await response.json()) as any;
-    const { outputAmount } = madhouseAggregator.getOutput(data);
+    const { outputAmount } = priceAggregator.getOutput(data);
 
     if (!outputAmount || outputAmount === "0") {
       console.log(`  No liquidity for MON -> ${tokenAddress}`);
@@ -1383,10 +1384,31 @@ async function fetchQuote(
     });
     const blockNumber = await publicClient.getBlockNumber();
 
-    const data = (await response.json()) as any;
+    const rawBody = await response.text();
+    let data: any = null;
+    let parsedOk = false;
+    if (rawBody) {
+      try {
+        data = JSON.parse(rawBody);
+        parsedOk = true;
+      } catch {
+        data = rawBody; // keep raw text
+      }
+    }
 
-    // Use aggregator class to parse output
-    const { outputAmount, txData, routesCount, fullData } = aggregator.getOutput(data);
+    // Use aggregator class to parse output (only if JSON)
+    const { outputAmount, txData, routesCount, fullData } = parsedOk ? aggregator.getOutput(data) : {
+      outputAmount: "0",
+      txData: null,
+      routesCount: 0,
+      fullData: data,
+    };
+
+    const quoteError = response.ok
+      ? undefined
+      : parsedOk
+        ? (data?.error || data?.message || data?.detail || data?.reason || `HTTP ${response.status}`)?.toString?.()
+        : `Non-JSON response (HTTP ${response.status}): ${String(rawBody).slice(0, 300)}`;
 
     return {
       time: new Date().toUTCString(),
@@ -1407,6 +1429,7 @@ async function fetchQuote(
       outputResult: "",
       outputAdj: outputAmount,
       blockNumber: blockNumber.toString(),
+      quoteError,
       simulationStatus: "pending",
       simulationOutput: "0",
       simulationError: undefined,
@@ -1437,6 +1460,7 @@ async function fetchQuote(
       outputResult: "",
       outputAdj: "0",
       blockNumber: undefined,
+      quoteError: (error as any)?.message || "Failed to fetch/parse quote",
       simulationStatus: "error",
       simulationOutput: "0",
       simulationError: "Failed to fetch quote",
@@ -2911,6 +2935,7 @@ async function runComparison(): Promise<void> {
       "outputResult",
       "outputAdj",
       "blockNumber",
+      "quoteError",
       "simulationStatus",
       "simulationOutput",
       "simulationOutputTokenOutDecimals",

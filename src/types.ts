@@ -47,6 +47,7 @@ export interface TestResult {
   outputResult: string;
   outputAdj: string;
   blockNumber?: string;
+  quoteError?: string; // Non-simulation quote error info (HTTP error body, parse issues, etc.)
   simulationStatus: string;
   simulationOutput: string;
   simulationOutputTokenOutDecimals?: string; // Formatted simulation output amount with proper decimals

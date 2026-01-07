@@ -1,5 +1,5 @@
 import type { QuoteRequest } from "../types";
-import { zeroAddress } from "viem";
+import { getAddress, zeroAddress } from "viem";
 import { BaseAggregator, type AggregatorOutput, type FetchOptions } from "./baseAggregator";
 
 export class MaceAggregator extends BaseAggregator {
@@ -22,6 +22,7 @@ export class MaceAggregator extends BaseAggregator {
     fetchOptions.method = "POST";
     fetchOptions.headers = {
       "Content-Type": "application/json",
+      Accept: "application/json",
     };
 
     // Mace uses "native" for native tokens, otherwise the token address
@@ -32,18 +33,19 @@ export class MaceAggregator extends BaseAggregator {
 
     const tokenInMace = isNativeIn ? "native" : request.tokenIn;
     const tokenOutMace = isNativeOut ? "native" : request.tokenOut;
+    const normalizeToken = (t: string) => (t === "native" ? t : getAddress(t));
 
     fetchOptions.body = JSON.stringify({
-      from: process.env.DEFAULT_SENDER_ACCOUNT || "", // Caller address (required by API)
+      from: getAddress(process.env.DEFAULT_SENDER_ACCOUNT || ""), // Caller address (required by API)
       in: [
         {
-          token: tokenInMace,
+          token: normalizeToken(tokenInMace),
           amount: request.amountIn,
         },
       ],
       out: [
         {
-          token: tokenOutMace,
+          token: normalizeToken(tokenOutMace),
           minAmount: "0",
           slippageToleranceBps: Math.floor((request.slippage || 0.005) * 10000), // Convert to basis points
         },
@@ -75,6 +77,6 @@ export class MaceAggregator extends BaseAggregator {
   }
 
   isBaseCompareAggregator(): boolean {
-    return false; // Not the base aggregator for comparisons
+    return true; // Mace is the base aggregator for comparisons
   }
 }
