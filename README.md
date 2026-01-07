@@ -118,7 +118,6 @@ sizes that real users actually transact.
 
 ## Supported Aggregators
 
-- **Madhouse**
 - **OpenOcean**
 - **Eisen Finance**
 - **Kuru** (requires JWT token)
@@ -180,9 +179,8 @@ AGGREGATOR SELECTION
 Use SPACE to select/deselect, ENTER to confirm
 
 ? Select aggregators to test: (Use arrow keys, space to select, enter to submit)
-❯◯ madhouse
+❯◯ openocean
  ◯ monorail
- ◯ openocean
  ◯ eisenFinance
  ◯ kuru
  ◯ mace
@@ -201,8 +199,8 @@ Use SPACE to select/deselect, ENTER to confirm
 
 **Examples:**
 
-- Select `madhouse` to run production environment
-- Select `madhouse`, `monorail`, `openocean`, and `eisenFinance` to compare against competitors
+- Select `mace` to run baseline environment
+- Select `mace`, `openocean`, and `eisenFinance` to compare against competitors
 - Select "All aggregators" to run a comprehensive comparison
 
 ### Command-Line Mode
@@ -212,9 +210,9 @@ For automation and scripting:
 Compare specific aggregators:
 
 ```bash
-bun start -- -a madhouse,monorail
+bun start -- -a mace,openocean
 # or
-bun start -- --aggregators madhouse,monorail,openocean
+bun start -- --aggregators mace,openocean,eisenFinance
 ```
 
 Enable transaction simulation:
@@ -232,7 +230,7 @@ Test with random pairs and amounts instead of the full test suite:
 bun start -- --random 10
 
 # Test with 20 random samples using specific aggregators
-bun start -- --random 20 -a madhouse,openocean
+bun start -- --random 20 -a mace,openocean
 
 # Random sampling with simulation
 bun start -- --random 15 --simulation
@@ -248,7 +246,7 @@ bun start -- --random 15 --simulation
 Combine options:
 
 ```bash
-bun start -- -a madhouse,monorail --simulation
+bun start -- -a mace,openocean --simulation
 ```
 
 Show help:
@@ -259,7 +257,6 @@ bun start -- --help
 
 **Available aggregator names:**
 
-- `madhouse`
 - `monorail`
 - `openocean`
 - `eisenFinance`
@@ -293,7 +290,7 @@ bun start -- --simulation
 - Aggregators without transaction data (txData) in their responses will be excluded
 - The script displays warnings for excluded aggregators during the selection phase
 - Simulation support by aggregator:
-  - ✅ Supported: Madhouse (all environments), Kuru, most major aggregators
+  - ✅ Supported: depends on aggregator returning tx data in responses
   - ⚠️ Check aggregator documentation for specific simulation capabilities
 
 ## Output
@@ -335,7 +332,7 @@ Total Tests: 100
 
 BEST QUOTE PERCENTAGE (by aggregator):
 --------------------------------------------------------------------------------
-  madhouse           : 35.00%  (35/100 routes)
+  mace               : 35.00%  (35/100 routes)
   monorail           : 28.00%  (28/100 routes)
   openocean          : 20.00%  (20/100 routes)
   eisenFinance       : 12.00%  (12/100 routes)
@@ -343,7 +340,7 @@ BEST QUOTE PERCENTAGE (by aggregator):
 
 FASTEST RESPONSE PERCENTAGE (by aggregator):
 --------------------------------------------------------------------------------
-  madhouse           : 45.00%  (45/100 routes)
+  mace               : 45.00%  (45/100 routes)
   monorail           : 30.00%  (30/100 routes)
   openocean          : 15.00%  (15/100 routes)
   eisenFinance       : 8.00%   (8/100 routes)
@@ -579,14 +576,13 @@ import { YourAggregator } from "./yourAggregator";
 // Add case to the createAggregator factory function
 export function createAggregator(name: string, baseUrl: string): BaseAggregator {
   switch (name.toLowerCase()) {
-    // ... existing cases (madhouseproductionapi, monorail, etc.)
+    // ... existing cases (monorail, openocean, etc.)
 
     case "youraggregator":
       return new YourAggregator(name, baseUrl);
 
     default:
-      // Default to MadhouseAggregator for unknown aggregators
-      return new MadhouseAggregator(name, baseUrl);
+      throw new Error(`Unknown aggregator "${name}"`);
   }
 }
 ```
@@ -654,7 +650,7 @@ Add the JWT to `.env` as `KURU_JWT=<token>`.
 
 **Other aggregators:**
 
-- Madhouse, Monorail, OpenOcean, Mace, Dirol: No API keys required for testnet
+- Monorail, OpenOcean, Mace, Dirol: No API keys required for testnet
 
 ## Scripts
 
@@ -758,11 +754,11 @@ compare-aggregators-monad/
 │   └── aggregators/                  # Aggregator implementations
 │       ├── index.ts                  # Aggregator factory and exports
 │       ├── baseAggregator.ts         # Abstract base class and interfaces
-│       ├── madhouseAggregator.ts     # Madhouse aggregator
+│       ├── (removed)                # Madhouse aggregator (no longer exists)
 │       ├── monorailAggregator.ts     # Monorail aggregator
 │       ├── openOceanAggregator.ts    # OpenOcean aggregator
 │       ├── eisenFinanceAggregator.ts  # Eisen Finance API
-│       ├── kuruAggregator.ts         # Kuru aggregator (requires Privy token)
+│       ├── kuruAggregator.ts         # Kuru aggregator (requires JWT)
 │       ├── maceAggregator.ts         # Mace aggregator
 │       ├── dirolAggregator.ts        # Dirol aggregator
 │       └── zeroXAggregator.ts        # 0x aggregator
