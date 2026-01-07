@@ -5,14 +5,18 @@ export class KuruAggregator extends BaseAggregator {
   constructor(name: string, baseUrl: string) {
     super(name, baseUrl);
 
-    // Kuru uses Privy authentication - need PRIVY_TOKEN from browser
-    if (!process.env.PRIVY_TOKEN) {
-      console.error(`Error: PRIVY_TOKEN is not set in environment variables.`);
-      console.error(`Kuru uses Privy authentication. To get the token:`);
-      console.error(`1. Open https://www.kuru.io/swap in your browser`);
-      console.error(`2. Open DevTools (F12) → Console`);
-      console.error(`3. Run: console.log(document.cookie)`);
-      console.error(`4. Copy the privy-token value and add to .env: PRIVY_TOKEN=<token>`);
+    // Kuru Flow API uses a Bearer JWT token (docs: https://docs.kuru.io/api-reference/calculate-best-path-quote)
+    // Provide via env: KURU_JWT
+    if (!process.env.KURU_JWT) {
+      console.error(`Error: KURU_JWT is not set in environment variables.`);
+      console.error(`Kuru Flow API requires a Bearer JWT (see Kuru docs).`);
+      console.error(`Set KURU_JWT=<token> in your .env file.`);
+      process.exit(1);
+    }
+    if (!process.env.DEFAULT_SENDER_ACCOUNT) {
+      console.error(`Error: DEFAULT_SENDER_ACCOUNT is not set in environment variables.`);
+      console.error(`This account is required for the ${name} aggregator.`);
+      console.error(`Please set DEFAULT_SENDER_ACCOUNT in your .env file.`);
       process.exit(1);
     }
   }
@@ -25,36 +29,32 @@ export class KuruAggregator extends BaseAggregator {
     fetchOptions.method = "POST";
     fetchOptions.headers = {
       "Content-Type": "application/json",
-      Cookie: `privy-token=${process.env.PRIVY_TOKEN}`,
-      Origin: "https://www.kuru.io",
-      Referer: "https://www.kuru.io/",
+      Authorization: `Bearer ${process.env.KURU_JWT}`,
     };
     fetchOptions.body = JSON.stringify({
+      userAddress: process.env.DEFAULT_SENDER_ACCOUNT || "",
       tokenIn: request.tokenIn,
       tokenOut: request.tokenOut,
       amount: request.amountIn,
-      autoSlippage: false,
-      slippageTolerance: Math.floor((request.slippage || 0.005) * 10000), // Convert to basis points
+      autoSlippage: true,
+      slippageTolerance: Math.floor((request.slippage || 0.005) * 10000), // bps (50 = 0.5%)
     });
   }
 
   getOutput(data: any): AggregatorOutput {
-    // Kuru format: nested data structure
-    const kuruTx = data.data?.data?.transaction;
-    const txData = kuruTx
-      ? {
-          to: kuruTx.to,
-          data: "0x" + kuruTx.calldata,
-          value: kuruTx.value,
-        }
-      : null;
+    // Kuru Flow API format
+    const outputAmount = data.output || "0";
 
-    // Count total pools across all hops
-    const hops = data.data?.data?.path?.hops || [];
-    const routesCount = hops.reduce((total: number, hop: any) => total + (hop.pools?.length || 0), 0);
+    // If buildResponse has tx data, try to normalize it.
+    const tx = data.buildResponse?.transaction || data.buildResponse?.tx || null;
+    const txData = tx?.to && tx?.data ? { to: tx.to, data: tx.data, value: tx.value } : null;
+
+    // Best-effort route count
+    const hops = data.path?.hops || data.path?.route?.hops || [];
+    const routesCount = Array.isArray(hops) ? hops.length : 0;
 
     return {
-      outputAmount: data.data?.data?.output || "0",
+      outputAmount,
       txData,
       routesCount,
       fullData: data,
@@ -62,7 +62,7 @@ export class KuruAggregator extends BaseAggregator {
   }
 
   isSimulationSupported(): boolean {
-    return true; // Kuru provides transaction data for simulation
+    return false; // Kuru tx build response format may vary; disable by default for now
   }
 
   isBaseCompareAggregator(): boolean {

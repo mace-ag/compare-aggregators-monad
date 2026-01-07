@@ -17,20 +17,20 @@ import { defineChain } from "viem";
 import { createAggregator, type BaseAggregator, type FetchOptions } from "./aggregators/index";
 import {
   COMMON_SLOTS_FOR_BALANCE_SET,
-  HARDCODED_PAIRS,
   NATIVE_TOKEN_ADDRESS,
   TEST_AMOUNTS,
-  USDC_ADDRESS,
 } from "./consts";
 import type { TokenPair, AggregatorConfig, QuoteRequest, TestResult, SimulationResult, SwapTransaction } from "./types";
 import { sleep, generateOutputFilename, isNativeToken, calculateAmountIn } from "./utils";
 import { createRobustTestClient, resetForkWithRetry, executeTransactionWithRetry, waitForAnvil } from "./utils/client";
 import { retryWithBackoff } from "./utils/retry";
 import { setupGracefulShutdown } from "./utils/error-recovery";
+import { getNetworkConfig } from "./network";
 
 // Parse command-line arguments
 const args = process.argv.slice(2);
 const SIMULATION = args.findIndex((arg) => arg === "--simulation" || arg === "-s") >= 0;
+const NETWORK_CONFIG = getNetworkConfig(args, process.env);
 
 // Parse aggregator selection argument
 // Usage: --aggregators madhouse,opeanocean or -a madhouse,openocean
@@ -57,6 +57,7 @@ Usage: bun run compare [options]
 
 Options:
   --simulation, -s         Enable transaction simulation (requires Anvil fork)
+  --network, -n <net>      Select network: mainnet | testnet (default: mainnet)
   --aggregators, -a <list> Comma-separated list of aggregators to test
                           Example: --aggregators madhouse,openocean
   --random, -r <count>    Test with random sampling of pairs and amounts
@@ -80,10 +81,23 @@ Examples:
 }
 
 // Configuration
-const CHAIN_ID = 10143;
+const CHAIN_ID = NETWORK_CONFIG.chainId;
 const SLIPPAGE = 0.005;
 const OUTPUT_DIR = "./comparison_results";
-const MONAD_TESTNET_RPC_URL = process.env.MONAD_TESTNET_RPC_URL || "";
+const MONAD_RPC_URL = NETWORK_CONFIG.rpcUrl;
+const HARDCODED_PAIRS = NETWORK_CONFIG.pairs;
+const USDC_ADDRESS = NETWORK_CONFIG.usdcAddress;
+
+if (!MONAD_RPC_URL) {
+  console.error(`Error: RPC URL not configured for ${NETWORK_CONFIG.chainName}.`);
+  console.error(`Set one of: MONAD_RPC_URL, MONAD_${NETWORK_CONFIG.network.toUpperCase()}_RPC_URL`);
+  process.exit(1);
+}
+if (HARDCODED_PAIRS.length === 0) {
+  console.error(`Error: No token pairs configured for ${NETWORK_CONFIG.chainName}.`);
+  console.error(`Set MONAD_PAIRS_JSON (JSON array of {tokenIn, tokenOut}) or set MONAD_USDC_ADDRESS to use a default MON<->USDC pair.`);
+  process.exit(1);
+}
 
 // RPC Configuration for forking
 // NOTE: This should point to your LOCAL Anvil instance, not the remote RPC
@@ -95,47 +109,14 @@ const TEST_ACCOUNT: Address =
 // Define custom chain
 const customChain = defineChain({
   id: CHAIN_ID,
-  name: "Monad Testnet",
-  nativeCurrency: { name: "Monad", symbol: "MON", decimals: 18 },
+  name: NETWORK_CONFIG.chainName,
+  nativeCurrency: { name: "Monad", symbol: NETWORK_CONFIG.nativeSymbol, decimals: 18 },
   rpcUrls: {
-    default: { http: [MONAD_TESTNET_RPC_URL] },
+    default: { http: [MONAD_RPC_URL] },
   },
 });
 
-const ALL_AGGREGATORS: AggregatorConfig[] = [
-  {
-    name: "madhouse",
-    baseUrl: "https://prod-api.madhouse.ag/swap/v1/quote",
-  },
-  {
-    name: "monorail",
-    baseUrl: "https://testnet-pathfinder.monorail.xyz/v4/quote",
-  },
-  {
-    name: "openocean",
-    baseUrl: "https://open-api.openocean.finance/v4/10143/swap",
-  },
-  {
-    name: "eisenFinance",
-    baseUrl: "https://api.hetz-01.eisenfinance.com/v1/chains/10143/v2/quote",
-  },
-  {
-    name: "kuru",
-    baseUrl: "https://rpc.kuru.io/swap",
-  },
-  {
-    name: "mace",
-    baseUrl: "https://testnet.api.mace.ag/swaps/get-best-routes",
-  },
-  {
-    name: "dirol",
-    baseUrl: "https://api.dirol.io/quote/order",
-  },
-  {
-    name: "0x",
-    baseUrl: "https://api.0x.org/swap/allowance-holder/quote",
-  },
-];
+const ALL_AGGREGATORS: AggregatorConfig[] = NETWORK_CONFIG.aggregators;
 
 // Helper function to select aggregators interactively
 async function selectAggregatorsInteractively(): Promise<AggregatorConfig[]> {
@@ -370,14 +351,17 @@ async function fetchTokenDataOnchain(
 
 // Helper function to fetch USDC price for a token using Madhouse API
 async function fetchUSDCPriceForToken(tokenAddress: string): Promise<number | null> {
+  if (!USDC_ADDRESS) {
+    return null;
+  }
   // Skip if it's USDC itself
   if (tokenAddress.toLowerCase() === USDC_ADDRESS.toLowerCase()) {
     return 1; // 1 USDC = 1 USDC
   }
 
   try {
-    // Create Madhouse production aggregator
-    const madhouseAggregator = createAggregator("madhouse", "https://prod-api.madhouse.ag/swap/v1/quote");
+    // Create Madhouse aggregator
+    const madhouseAggregator = createAggregator("madhouse", NETWORK_CONFIG.aggregatorBaseUrls.madhouse);
 
     // We need to know how much USDC we get for 1 unit of the token
     // So we query USDC -> token with 1 USDC input to get the exchange rate
@@ -428,8 +412,8 @@ async function fetchMONPriceForToken(tokenAddress: string): Promise<number | nul
   }
 
   try {
-    // Create Madhouse production aggregator
-    const madhouseAggregator = createAggregator("madhouse", "https://prod-api.madhouse.ag/swap/v1/quote");
+    // Create Madhouse aggregator
+    const madhouseAggregator = createAggregator("madhouse", NETWORK_CONFIG.aggregatorBaseUrls.madhouse);
 
     // We need to know how much MON we get for 1 unit of the token
     // So we query MON -> token with 1 MON input to get the exchange rate
@@ -507,12 +491,16 @@ async function fetchPricesForAllTokens(): Promise<void> {
     }
 
     // Fetch USDC price
-    const usdcPrice = await fetchUSDCPriceForToken(tokenAddress);
-    if (usdcPrice !== null) {
-      TOKEN_PRICES_IN_USDC[tokenAddress.toLowerCase()] = usdcPrice;
-      console.log(`    ✓ 1 USDC = ${usdcPrice} ${tokenData.symbol}`);
+    if (USDC_ADDRESS) {
+      const usdcPrice = await fetchUSDCPriceForToken(tokenAddress);
+      if (usdcPrice !== null) {
+        TOKEN_PRICES_IN_USDC[tokenAddress.toLowerCase()] = usdcPrice;
+        console.log(`    ✓ 1 USDC = ${usdcPrice} ${tokenData.symbol}`);
+      } else {
+        console.log(`    ✗ Failed to fetch USDC price`);
+      }
     } else {
-      console.log(`    ✗ Failed to fetch USDC price`);
+      console.log(`    - Skipping USDC pricing (MONAD_USDC_ADDRESS not set)`);
     }
 
     // Small delay to avoid rate limiting
@@ -577,7 +565,7 @@ async function getTokenSymbol(tokenAddress: Address): Promise<string> {
 // Helper function to calculate gas cost in tokenOut
 function calculateGasCostInTokenOut(gasUsed: string, tokenOutAddress: string, tokenOutDecimals: number): string {
   try {
-    // Gas price on Monad testnet (estimated)
+    // Gas price on Monad (rough estimate; override by setting DEFAULT_GAS_PRICE where applicable)
     const gasPrice = BigInt("1000000000"); // 1 Gwei in Wei
     const gasCostInWei = BigInt(gasUsed) * gasPrice;
     const gasCostInMON = Number(gasCostInWei) / 10 ** 18;
@@ -1147,7 +1135,7 @@ async function getTokenBalance(
 async function forkToBlock(client: any, blockNumber: bigint): Promise<void> {
   try {
     // Use retry logic for fork reset with extended timeouts
-    await resetForkWithRetry(client, MONAD_TESTNET_RPC_URL, blockNumber, {
+    await resetForkWithRetry(client, MONAD_RPC_URL, blockNumber, {
       maxAttempts: 5, // Try up to 5 times for fork operations
     });
 
@@ -1176,8 +1164,8 @@ async function simulateTransaction(
     // Set up balances
     if (isNative) {
       // Set a very high balance to ensure enough for value + gas costs
-      // Gas costs on testnets can be unpredictable, so we set 1000000x the swap amount or minimum 1000 ETH
-      const minBalance = BigInt(1000) * BigInt(10) ** BigInt(18); // 1000 ETH
+      // Gas costs can be unpredictable, so we set 1000000x the swap amount or minimum 1000 MON
+      const minBalance = BigInt(1000) * BigInt(10) ** BigInt(18); // 1000 MON
       const calculatedBalance = amountIn * 1000000n;
       const balance = calculatedBalance > minBalance ? calculatedBalance : minBalance;
       await setNativeBalance(client, TEST_ACCOUNT, balance);

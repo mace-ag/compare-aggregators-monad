@@ -3,7 +3,7 @@
 ## Overview
 
 The DEX Aggregator Comparison Script is a sophisticated benchmarking and analysis tool designed to objectively compare
-the performance of decentralized exchange (DEX) aggregators on the Monad testnet. This tool helps identify which
+the performance of decentralized exchange (DEX) aggregators on Monad (mainnet or testnet). This tool helps identify which
 aggregators provide the best trading outcomes for users by testing real-world trading scenarios across hundreds of token
 pairs and trade sizes.
 
@@ -119,13 +119,18 @@ sizes that real users actually transact.
 ## Supported Aggregators
 
 - **Madhouse**
-- **Monorail**
 - **OpenOcean**
 - **Eisen Finance**
-- **Kuru** (requires Privy authentication token)
+- **Kuru** (requires JWT token)
 - **Mace**
 - **Dirol**
 - **0x** (requires API key)
+
+### Mainnet Availability Notes
+
+- **Monorail**: currently not available on mainnet (disabled by default). Enable only if you have a working endpoint by setting `ENABLE_MONORAIL=1` and `AGG_MONORAIL_BASE_URL=...`.
+- **Dirol**: may not be available on mainnet (disabled by default unless `AGG_DIROL_BASE_URL` is set).
+- **0x**: disabled by default unless `ZEROX_API_KEY` is set.
 
 ## Prerequisites
 
@@ -496,18 +501,12 @@ These utilities provide:
 - **Graceful shutdown** handling for clean termination
 - **Health checks** for Anvil and other services
 
-Edit chain configuration in `src/compare.ts`:
+Network configuration lives in `src/network.ts` and can be selected at runtime:
 
-```typescript
-// Chain configuration
-const CHAIN_ID = 10143; // Monad testnet
+- Use CLI: `bun start -- --network mainnet` (or `testnet`)
+- Or env: `MONAD_NETWORK=mainnet` (or `testnet`)
 
-// Slippage tolerance
-const SLIPPAGE = 0.005; // 0.5%
-
-// Output directory
-const OUTPUT_DIR = "./comparison_results";
-```
+RPC URL is provided via `MONAD_RPC_URL` (or `MONAD_MAINNET_RPC_URL` / `MONAD_TESTNET_RPC_URL`).
 
 ### Token Pairs
 
@@ -609,8 +608,16 @@ const ALL_AGGREGATORS: AggregatorConfig[] = [
 The script requires several environment variables. Create a `.env` file in the project root:
 
 ```bash
-# Required: Monad Testnet RPC URL
-MONAD_TESTNET_RPC_URL=<your_monad_testnet_rpc_url>
+# Optional: network selection
+MONAD_NETWORK=mainnet
+
+# Required: Monad RPC URL (use one of these)
+MONAD_RPC_URL=<your_monad_rpc_url>
+# MONAD_MAINNET_RPC_URL=<your_monad_mainnet_rpc_url>
+# MONAD_TESTNET_RPC_URL=<your_monad_testnet_rpc_url>
+
+# Optional (mainnet): override default curated mainnet pairs.
+# MONAD_PAIRS_JSON='[{"tokenIn":"0x0000000000000000000000000000000000000000","tokenOut":"0x..."}]'
 
 # Required for simulation: Anvil RPC URL (local)
 ANVIL_RPC_URL=http://127.0.0.1:8545
@@ -621,26 +628,19 @@ DEFAULT_SENDER_ACCOUNT=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
 # Optional: Gas price configuration
 DEFAULT_GAS_PRICE=<your_gas_price>
 
-# API Keys (optional - some aggregators work without API keys)
+# API Keys / Auth (optional - some aggregators work without API keys)
 ZEROX_API_KEY=<zerox_api_key>
 
-# Required for Kuru: Privy authentication token
-PRIVY_TOKEN=<privy_token>
+# Required for Kuru Flow API: Bearer JWT
+KURU_JWT=<kuru_jwt_token>
 ```
 
 ### Getting API Keys and Tokens
 
-**Kuru (Privy Token):**
+**Kuru (Flow API JWT):**
 
-Kuru uses Privy authentication and requires a browser-obtained token:
-
-1. Open https://www.kuru.io/swap in your browser
-2. Open DevTools (F12) → Console
-3. Run: `console.log(document.cookie)`
-4. Copy the `privy-token` value
-5. Add to `.env`: `PRIVY_TOKEN=<token>`
-
-Note: Privy tokens expire, so you may need to refresh them periodically.
+Kuru uses the Flow API with Bearer JWT auth. See Kuru docs: `https://docs.kuru.io/api-reference/calculate-best-path-quote`.
+Add the JWT to `.env` as `KURU_JWT=<token>`.
 
 **Eisen Finance:**
 
@@ -725,13 +725,13 @@ If you hit rate limits:
 3. Use fewer aggregators in parallel
 4. Add delays between tests (modify retry settings in `src/utils/retry.ts`)
 
-### Kuru "PRIVY_TOKEN not set" Error
+### Kuru "KURU_JWT not set" Error
 
-Follow the Kuru authentication steps in the Environment Variables section to obtain and set your Privy token.
+Set `KURU_JWT` per the Kuru Flow API docs: `https://docs.kuru.io/api-reference/calculate-best-path-quote`.
 
 ### "Connection refused" or Timeout Errors
 
-1. Check your `MONAD_TESTNET_RPC_URL` is correct and accessible
+1. Check your `MONAD_RPC_URL` (or network-specific RPC env var) is correct and accessible
 2. Verify network connectivity
 3. The script will automatically retry transient failures
 4. For persistent issues, check if the RPC endpoint is rate-limiting
@@ -745,7 +745,9 @@ compare-aggregators-monad/
 ├── src/
 │   ├── compare.ts                    # Main comparison logic and orchestration
 │   ├── types.ts                      # TypeScript type definitions
-│   ├── consts.ts                     # Constants (token pairs, prices, amounts)
+│   ├── consts.ts                     # Constants (amounts, native token address, balance slots)
+│   ├── network.ts                    # Mainnet/testnet configuration (chainId, RPC env, aggregator base URLs)
+│   ├── pairs/                        # Network-specific pair lists (testnet defaults live here)
 │   ├── utils.ts                      # Core utility functions
 │   ├── abis/
 │   │   └── erc20.ts                  # ERC20 token ABI

@@ -3,6 +3,17 @@ import { zeroAddress } from "viem";
 import { BaseAggregator, type AggregatorOutput, type FetchOptions } from "./baseAggregator";
 
 export class MaceAggregator extends BaseAggregator {
+  constructor(name: string, baseUrl: string) {
+    super(name, baseUrl);
+
+    if (!process.env.DEFAULT_SENDER_ACCOUNT) {
+      console.error(`Error: DEFAULT_SENDER_ACCOUNT is not set in environment variables.`);
+      console.error(`This account is required for the ${name} aggregator.`);
+      console.error(`Please set DEFAULT_SENDER_ACCOUNT in your .env file.`);
+      process.exit(1);
+    }
+  }
+
   buildQuoteUrl(_request: QuoteRequest): string {
     return this.baseUrl;
   }
@@ -23,7 +34,7 @@ export class MaceAggregator extends BaseAggregator {
     const tokenOutMace = isNativeOut ? "native" : request.tokenOut;
 
     fetchOptions.body = JSON.stringify({
-      from: "0x64ce225A6214cB7071ec8fD23f35D843ED7807a7", // Test account
+      from: process.env.DEFAULT_SENDER_ACCOUNT || "", // Caller address (required by API)
       in: [
         {
           token: tokenInMace,
