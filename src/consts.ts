@@ -1,7 +1,7 @@
 // Test amounts in USD
 export const TEST_AMOUNTS = [
   1, 2.5, 5, 10, 17.5, 25, 37.5, 50, 75, 100, 125, 150, 175, 200, 250, 375, 500, 750, 1000, 1750, 2500, 5000, 10000,
-  25000, 50000, 100000, 250000, 500000,
+  25000, 50000, 75000, 90000,
 ];
 
 // Native token addresses (these represent ETH/native currency)

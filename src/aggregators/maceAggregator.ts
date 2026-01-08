@@ -5,13 +5,6 @@ import { BaseAggregator, type AggregatorOutput, type FetchOptions } from "./base
 export class MaceAggregator extends BaseAggregator {
   constructor(name: string, baseUrl: string) {
     super(name, baseUrl);
-
-    if (!process.env.DEFAULT_SENDER_ACCOUNT) {
-      console.error(`Error: DEFAULT_SENDER_ACCOUNT is not set in environment variables.`);
-      console.error(`This account is required for the ${name} aggregator.`);
-      console.error(`Please set DEFAULT_SENDER_ACCOUNT in your .env file.`);
-      process.exit(1);
-    }
   }
 
   buildQuoteUrl(_request: QuoteRequest): string {
@@ -35,8 +28,12 @@ export class MaceAggregator extends BaseAggregator {
     const tokenOutMace = isNativeOut ? "native" : request.tokenOut;
     const normalizeToken = (t: string) => (t === "native" ? t : getAddress(t));
 
-    fetchOptions.body = JSON.stringify({
-      from: getAddress(process.env.DEFAULT_SENDER_ACCOUNT || ""), // Caller address (required by API)
+    const fromOverride = (process.env.MACE_FROM_ADDRESS || "").trim();
+
+    // IMPORTANT:
+    // If `from` is provided, Mace will simulate swaps from that address and it must hold the offered assets.
+    // For generic quote comparisons, omit `from` unless you explicitly want balance-aware simulation.
+    const body: any = {
       in: [
         {
           token: normalizeToken(tokenInMace),
@@ -50,7 +47,10 @@ export class MaceAggregator extends BaseAggregator {
           slippageToleranceBps: Math.floor((request.slippage || 0.005) * 10000), // Convert to basis points
         },
       ],
-    });
+    };
+    if (fromOverride) body.from = getAddress(fromOverride);
+
+    fetchOptions.body = JSON.stringify(body);
   }
 
   getOutput(data: any): AggregatorOutput {

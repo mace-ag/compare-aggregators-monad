@@ -6,6 +6,7 @@ import {
   http,
   type Address,
   type Hash,
+  getAddress,
   toHex,
   keccak256,
   pad,
@@ -82,7 +83,13 @@ Examples:
 
 // Configuration
 const CHAIN_ID = NETWORK_CONFIG.chainId;
-const SLIPPAGE = 0.005;
+const SLIPPAGE_BPS = (() => {
+  const raw = (process.env.SLIPPAGE_BPS || "").trim();
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  // Default to 2000 bps (20%) so illiquid routes don't hard-fail on slippage checks.
+  return Number.isFinite(n) && n >= 0 ? n : 2000;
+})();
+const SLIPPAGE = SLIPPAGE_BPS / 10_000;
 const OUTPUT_DIR = "./comparison_results";
 const MONAD_RPC_URL = NETWORK_CONFIG.rpcUrl;
 const HARDCODED_PAIRS = NETWORK_CONFIG.pairs;
@@ -1333,6 +1340,72 @@ function buildQuoteUrl(aggregator: BaseAggregator, request: QuoteRequest): strin
   return aggregator.buildQuoteUrl(request);
 }
 
+function parseFromByTokenMap(raw: string | undefined): Record<string, string> | null {
+  const s = (raw || "").trim();
+  if (!s) return null;
+  try {
+    const parsed = JSON.parse(s);
+    if (parsed && typeof parsed === "object") return parsed as Record<string, string>;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function buildMaceBody(request: QuoteRequest, from?: string): any {
+  const isNativeIn = request.tokenIn === NATIVE_TOKEN_ADDRESS;
+  const isNativeOut = request.tokenOut === NATIVE_TOKEN_ADDRESS;
+
+  const tokenIn = isNativeIn ? "native" : getAddress(request.tokenIn);
+  const tokenOut = isNativeOut ? "native" : getAddress(request.tokenOut);
+
+  const body: any = {
+    in: [{ token: tokenIn, amount: request.amountIn }],
+    out: [
+      {
+        token: tokenOut,
+        minAmount: "0",
+        slippageToleranceBps: Math.floor((request.slippage || 0.005) * 10000),
+      },
+    ],
+  };
+  if (from) body.from = getAddress(from);
+  return body;
+}
+
+function maceNeedsFundedFrom(err: string | undefined): boolean {
+  const s = (err || "").toLowerCase();
+  return s.includes("requires an account with sufficient balance to simulate swaps") || s.includes("largestbagholder");
+}
+
+async function hasSufficientBalanceForTokenIn(
+  tokenIn: string,
+  holder: string,
+  requiredAmount: bigint,
+  tokenInDecimals: number,
+): Promise<{ ok: boolean; balance: bigint; required: bigint }> {
+  const publicClient = createPublicClient({
+    chain: customChain,
+    transport: http(customChain.rpcUrls.default.http[0]),
+  });
+
+  const holderAddr = getAddress(holder) as Address;
+  if (tokenIn === NATIVE_TOKEN_ADDRESS) {
+    const bal = await publicClient.getBalance({ address: holderAddr });
+    return { ok: bal >= requiredAmount, balance: bal, required: requiredAmount };
+  }
+
+  const tokenAddr = getAddress(tokenIn) as Address;
+  const bal = (await publicClient.readContract({
+    address: tokenAddr,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [holderAddr],
+  })) as bigint;
+
+  return { ok: bal >= requiredAmount, balance: bal, required: requiredAmount };
+}
+
 // Helper function to fetch quote (without simulation)
 async function fetchQuote(
   aggregator: BaseAggregator,
@@ -1373,6 +1446,12 @@ async function fetchQuote(
     const fetchOptions: FetchOptions = {};
     aggregator.addRequestData(request, fetchOptions);
 
+    // Mace special-case: don't force `from` unless explicitly asked via MACE_FROM_ADDRESS.
+    // If the API returns a "requires balance" error, we can retry using MACE_FROM_ADDRESS_BY_TOKEN.
+    const isMace = aggregator.name.toLowerCase() === "mace";
+    const fromByToken = isMace ? parseFromByTokenMap(process.env.MACE_FROM_ADDRESS_BY_TOKEN) : null;
+    const tokenInKey = pair.tokenIn.toLowerCase();
+
     const response = await fetch(url, fetchOptions as RequestInit);
     const endTime = performance.now();
     const duration = Math.round(endTime - startTime);
@@ -1404,11 +1483,129 @@ async function fetchQuote(
       fullData: data,
     };
 
-    const quoteError = response.ok
+    let quoteError = response.ok
       ? undefined
       : parsedOk
-        ? (data?.error || data?.message || data?.detail || data?.reason || `HTTP ${response.status}`)?.toString?.()
+        ? (data?.error ||
+            data?.message ||
+            data?.detail ||
+            data?.reason ||
+            `HTTP ${response.status}: ${typeof data === "string" ? data.slice(0, 300) : JSON.stringify(data).slice(0, 300)}`)?.toString?.()
         : `Non-JSON response (HTTP ${response.status}): ${String(rawBody).slice(0, 300)}`;
+
+    // If Mace says it needs a funded `from`, retry once with token-specific holder (if provided).
+    if (isMace && !response.ok && fromByToken && maceNeedsFundedFrom(quoteError)) {
+      const holder = fromByToken[tokenInKey] || fromByToken[getAddress(pair.tokenIn).toLowerCase()];
+      if (holder) {
+        // Preflight: don't even retry if the holder can't cover the required amount.
+        try {
+          const required = BigInt(request.amountIn);
+          const preflight = await hasSufficientBalanceForTokenIn(pair.tokenIn, holder, required, tokenInDecimals);
+          if (!preflight.ok) {
+            const balFmt = formatUnits(preflight.balance, tokenInDecimals);
+            const reqFmt = formatUnits(preflight.required, tokenInDecimals);
+            quoteError = `${quoteError} (holder ${holder} balance ${balFmt} < required ${reqFmt}; need a better holder for this size)`;
+            return {
+              time: new Date().toUTCString(),
+              timestamp: Date.now(),
+              protocol: aggregator.name,
+              tokenFromSymbol: tokenFromSymbol,
+              tokenToSymbol: tokenToSymbol,
+              tokenIn: pair.tokenIn,
+              tokenOut: pair.tokenOut,
+              amount: usdAmount.toString(),
+              amountInTokenIn: amountInTokenIn,
+              output: outputAmount,
+              duration,
+              status: response.status,
+              url,
+              routes: routesCount,
+              durationResult: "",
+              outputResult: "",
+              outputAdj: outputAmount,
+              blockNumber: blockNumber.toString(),
+              quoteError,
+              simulationStatus: "pending",
+              simulationOutput: "0",
+              simulationError: undefined,
+              txData: txData,
+              amountIn: amountIn.toString(),
+              fullData: fullData,
+            };
+          }
+        } catch (e: any) {
+          quoteError = `${quoteError} (holder preflight failed: ${e?.message || "unknown"})`;
+        }
+
+        const retryStart = performance.now();
+        const retryBody = JSON.stringify(buildMaceBody(request, holder));
+        const retryResp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: retryBody,
+        } as any);
+
+        const retryRaw = await retryResp.text();
+        let retryData: any = null;
+        let retryParsedOk = false;
+        if (retryRaw) {
+          try {
+            retryData = JSON.parse(retryRaw);
+            retryParsedOk = true;
+          } catch {
+            retryData = retryRaw;
+          }
+        }
+        const retryEnd = performance.now();
+        const retryDuration = Math.round(retryEnd - retryStart);
+
+        const retryParsed = retryParsedOk ? aggregator.getOutput(retryData) : { outputAmount: "0", txData: null, routesCount: 0, fullData: retryData };
+        const retryQuoteError = retryResp.ok
+          ? undefined
+          : retryParsedOk
+            ? (retryData?.error ||
+                retryData?.message ||
+                retryData?.detail ||
+                retryData?.reason ||
+                `HTTP ${retryResp.status}: ${typeof retryData === "string" ? retryData.slice(0, 300) : JSON.stringify(retryData).slice(0, 300)}`)?.toString?.()
+            : `Non-JSON response (HTTP ${retryResp.status}): ${String(retryRaw).slice(0, 300)}`;
+
+        // Use retry result if it succeeded or at least produced a different actionable error.
+        if (retryResp.ok && retryParsed.outputAmount && retryParsed.outputAmount !== "0") {
+          quoteError = undefined;
+          return {
+            time: new Date().toUTCString(),
+            timestamp: Date.now(),
+            protocol: aggregator.name,
+            tokenFromSymbol: tokenFromSymbol,
+            tokenToSymbol: tokenToSymbol,
+            tokenIn: pair.tokenIn,
+            tokenOut: pair.tokenOut,
+            amount: usdAmount.toString(),
+            amountInTokenIn: amountInTokenIn,
+            output: retryParsed.outputAmount,
+            duration: retryDuration,
+            status: retryResp.status,
+            url,
+            routes: retryParsed.routesCount,
+            durationResult: "",
+            outputResult: "",
+            outputAdj: retryParsed.outputAmount,
+            blockNumber: blockNumber.toString(),
+            quoteError: retryQuoteError,
+            simulationStatus: "pending",
+            simulationOutput: "0",
+            simulationError: undefined,
+            txData: retryParsed.txData,
+            amountIn: amountIn.toString(),
+            fullData: retryParsed.fullData,
+          };
+        }
+
+        // If retry didn't succeed, keep original error but annotate that we tried a holder.
+        quoteError = quoteError ? `${quoteError} (retry with holder ${holder} failed: ${retryQuoteError || "unknown"})` : retryQuoteError;
+      }
+    }
 
     return {
       time: new Date().toUTCString(),

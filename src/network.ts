@@ -1,12 +1,11 @@
 import type { AggregatorConfig, TokenPair } from "./types";
-import { NATIVE_TOKEN_ADDRESS } from "./consts";
 import { MAINNET_HARDCODED_PAIRS, MAINNET_USDC_ADDRESS } from "./pairs/mainnetPairs";
 import { TESTNET_HARDCODED_PAIRS, TESTNET_USDC_ADDRESS } from "./pairs/testnetPairs";
 
 export type MonadNetwork = "mainnet" | "testnet";
 export type Env = Record<string, string | undefined>;
 
-export type AggregatorName = "madhouse" | "monorail" | "openocean" | "eisenFinance" | "kuru" | "mace" | "dirol" | "0x";
+export type AggregatorName = "monorail" | "openocean" | "eisenFinance" | "kuru" | "mace" | "dirol" | "0x";
 
 export interface NetworkConfig {
   network: MonadNetwork;
@@ -50,7 +49,6 @@ function getRpcUrl(network: MonadNetwork, env: Env): string {
 }
 
 function getAggregatorBaseUrls(network: MonadNetwork, chainId: number, env: Env): Record<AggregatorName, string> {
-  const madhouse = (env.AGG_MADHOUSE_BASE_URL || "https://prod-api.madhouse.ag/swap/v1/quote").trim();
   const monorailDefault =
     network === "mainnet" ? "https://pathfinder.monorail.xyz/v4/quote" : "https://testnet-pathfinder.monorail.xyz/v4/quote";
   const monorail = (env.AGG_MONORAIL_BASE_URL || monorailDefault).trim();
@@ -68,7 +66,6 @@ function getAggregatorBaseUrls(network: MonadNetwork, chainId: number, env: Env)
   const zerox = (env.AGG_0X_BASE_URL || "https://api.0x.org/swap/allowance-holder/quote").trim();
 
   return {
-    madhouse,
     monorail,
     openocean,
     eisenFinance,
@@ -114,12 +111,14 @@ export function getNetworkConfig(args: string[], env: Env): NetworkConfig {
   // - Mainnet: Monorail/Dirol may not be available, so keep them opt-in via env.
   // - 0x requires an API key, so include only if configured.
   const baseAggs: AggregatorConfig[] = [
-    { name: "madhouse", baseUrl: aggregatorBaseUrls.madhouse },
     { name: "openocean", baseUrl: aggregatorBaseUrls.openocean },
     { name: "eisenFinance", baseUrl: aggregatorBaseUrls.eisenFinance },
-    { name: "kuru", baseUrl: aggregatorBaseUrls.kuru },
     { name: "mace", baseUrl: aggregatorBaseUrls.mace },
   ];
+
+  const maybeKuru = (env.KURU_JWT || "").trim() || (env.ENABLE_KURU || "").toLowerCase() === "true" || (env.ENABLE_KURU || "") === "1"
+    ? [{ name: "kuru", baseUrl: aggregatorBaseUrls.kuru }]
+    : [];
 
   const maybeMonorail =
     network === "testnet" || (env.ENABLE_MONORAIL || "").toLowerCase() === "true" || (env.ENABLE_MONORAIL || "") === "1"
@@ -134,7 +133,7 @@ export function getNetworkConfig(args: string[], env: Env): NetworkConfig {
 
   const maybeZeroX = (env.ZEROX_API_KEY || "").trim() ? [{ name: "0x", baseUrl: aggregatorBaseUrls["0x"] }] : [];
 
-  const aggregators: AggregatorConfig[] = [...baseAggs, ...maybeMonorail, ...maybeDirol, ...maybeZeroX];
+  const aggregators: AggregatorConfig[] = [...baseAggs, ...maybeKuru, ...maybeMonorail, ...maybeDirol, ...maybeZeroX];
 
   const pairs = getPairs(network, env, usdcAddress);
 

@@ -2,7 +2,6 @@
 export { BaseAggregator, type AggregatorOutput, type FetchOptions } from "./baseAggregator";
 
 // Export all aggregator classes
-export { MadhouseAggregator } from "./madhouseAggregator";
 export { MonorailAggregator } from "./monorailAggregator";
 export { OpenOceanAggregator } from "./openOceanAggregator";
 export { EisenFinanceAggregator } from "./eisenFinanceAggregator";
@@ -13,7 +12,6 @@ export { ZeroXAggregator } from "./zeroXAggregator";
 
 // Import for factory function
 import { BaseAggregator } from "./baseAggregator";
-import { MadhouseAggregator } from "./madhouseAggregator";
 import { MonorailAggregator } from "./monorailAggregator";
 import { OpenOceanAggregator } from "./openOceanAggregator";
 import { EisenFinanceAggregator } from "./eisenFinanceAggregator";
@@ -25,9 +23,6 @@ import { ZeroXAggregator } from "./zeroXAggregator";
 // Factory function to create aggregators
 export function createAggregator(name: string, baseUrl: string): BaseAggregator {
   switch (name.toLowerCase()) {
-    case "madhouse":
-      return new MadhouseAggregator(name, baseUrl);
-
     case "monorail":
       return new MonorailAggregator(name, baseUrl);
 
@@ -51,7 +46,6 @@ export function createAggregator(name: string, baseUrl: string): BaseAggregator 
       return new ZeroXAggregator(name, baseUrl);
 
     default:
-      // Default to Madhouse aggregator for unknown aggregators
-      return new MadhouseAggregator(name, baseUrl);
+      throw new Error(`Unknown aggregator "${name}". Supported: monorail, openocean, eisenFinance, kuru, mace, dirol, 0x`);
   }
 }

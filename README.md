@@ -653,6 +653,29 @@ Kuru uses the Flow API with Bearer JWT auth. See Kuru docs:
 
 - Monorail, OpenOcean, Mace, Dirol: No API keys required for testnet
 
+**Mace notes:**
+
+- The Mace `/get-best-routes` endpoint supports an optional `from` field used for balance-aware simulation.
+- This repo **does not send `from` by default**, so you can get quotes for any pair without needing token balances.
+- If you _do_ want balance-aware simulation, set `MACE_FROM_ADDRESS=<address>` and ensure it holds enough of the input
+  token, otherwise you may see solver failures like “transfer amount exceeds balance”. (See Mace API overview:
+  [`https://api.mace.ag/swaps/rapidoc#overview`](https://api.mace.ag/swaps/rapidoc#overview))
+
+- Some tokens (e.g. AUSD) may also require a funded `from` address for _large_ trade sizes. You can provide per-token
+  overrides with:
+  - `MACE_FROM_ADDRESS_BY_TOKEN='{"0x00000000eFE302BEAA2b3e6e1b18d08D69a9012a":"0x465A0B350bb6a7eFF750729f1D866d67F0b53980"}'`
+  - Keys are **tokenIn addresses**, values are **funded holder addresses**.
+
+You can also start from the repo’s full example map and export it:
+
+```bash
+export MACE_FROM_ADDRESS_BY_TOKEN="$(cat mace_from_by_token.example.json)"
+```
+
+Important: `MACE_FROM_ADDRESS_BY_TOKEN` is used as a **fallback retry** only when Mace returns a “requires sufficient
+balance” error. We **do not** send `from` by default (sending `from` for everything can reduce quote success if the
+holder doesn’t actually have enough balance for a given trade size).
+
 ## Scripts
 
 - `bun start` - Run the comparison script (interactive mode)
